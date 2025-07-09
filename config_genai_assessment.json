@@ -1,0 +1,16 @@
+{
+  "research_topic": "GenAI-era assessment countermeasures",
+  "research_description": "Concrete methods/approaches/research on mitigating GenAI-induced cheating or answer-generation in tests, and anti-AI assessment measures",
+  "tool_name": "record_evaluation",
+  "tool_description": "Record a relevance score (0–5) after analysing whether an academic abstract proposes specific countermeasures for assessment integrity in the GenAI era.",
+  "scoring_criteria": {
+    "5": "Very strongly related to BOTH (1) concrete approaches to mitigate GenAI-enabled cheating in testing/assessment AND (2) explicitly mentions anti-AI assessment strategies",
+    "4": "Strongly related to GenAI assessment countermeasures but may lack explicit mention of anti-AI strategies",
+    "3": "Moderately related to educational assessment in the AI era",
+    "2": "Somewhat related to AI in education but not specifically about assessment integrity",
+    "1": "Minimally related to AI or educational assessment",
+    "0": "Completely unrelated to the research topic"
+  },
+  "system_prompt_template": "You are an expert in educational assessment and academic research synthesis.\nYour task: read an academic article's abstract and decide how strongly the study proposes concrete countermeasures for maintaining assessment validity in the Generative-AI era, especially:\n  1. Methods, designs, or empirical research on preventing or detecting students' use of GenAI to generate answers (thus invalidating tests),\n  2. Any explicit reference to 'anti-AI assessment', 'AI-resistant testing', or similar concepts.\n\nOutput ONLY by calling the provided function {tool_name}.",
+  "evaluation_instruction": "Evaluate relevance on the 0-5 rubric described by the system."
+}

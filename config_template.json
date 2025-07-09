@@ -1,0 +1,16 @@
+{
+  "research_topic": "Your research topic here",
+  "research_description": "Detailed description of what you are looking for in the abstracts",
+  "tool_name": "record_evaluation",
+  "tool_description": "Record a relevance score (0–5) after analysing whether an academic abstract is related to [YOUR TOPIC].",
+  "scoring_criteria": {
+    "5": "Very strongly related to your research topic - describe what constitutes the highest relevance",
+    "4": "Strongly related to your research topic",
+    "3": "Moderately related to your research topic",
+    "2": "Somewhat related to your research topic",
+    "1": "Minimally related to your research topic",
+    "0": "Completely unrelated to your research topic"
+  },
+  "system_prompt_template": "You are an expert in [YOUR DOMAIN] and academic research synthesis.\nYour task: read an academic article's abstract and decide how strongly the study relates to [YOUR SPECIFIC RESEARCH FOCUS].\n\nLook for:\n  1. [SPECIFIC CRITERION 1]\n  2. [SPECIFIC CRITERION 2]\n  3. [SPECIFIC CRITERION 3]\n\nOutput ONLY by calling the provided function {tool_name}.",
+  "evaluation_instruction": "Evaluate relevance on the 0-5 rubric described by the system."
+}
