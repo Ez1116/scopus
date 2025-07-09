@@ -33,11 +33,13 @@ python scopus-abstract.py --input my_data.csv --output my_results.csv --config m
 ```
 
 **輸入CSV要求：**
-- 必須包含 'title' 和 'abstract' 列
+- 必須包含 'title' & 'abstract' & 'DOI' & 'Link' 列
 
 **輸出CSV格式：**
 - `title`：文章標題
 - `relevance_score`：0-5的整數相關性評分
+- `DOI`：文章永久網址
+- `Link`：文章 SCOPUS 連結
 
 ## 配置系統
 
