@@ -55,6 +55,7 @@ import asyncio
 import csv
 import json
 import os
+import time
 # from typing import List  # No longer needed
 from dotenv import load_dotenv
 from tqdm.asyncio import tqdm_asyncio
@@ -70,6 +71,8 @@ CONCURRENT_REQUESTS = 50
 DEFAULT_TEMPERATURE = 0
 MAX_TOKENS = 8192
 DEFAULT_CONFIG_FILE = "config_genai_assessment.json"
+DEFAULT_BATCH_SIZE = 50
+MAX_RETRIES = 3
 
 # ---------------------------- configuration loading ----------------------------- #
 
@@ -145,20 +148,12 @@ def create_batch_evaluation_function(config):
 
 # ----------------------------- main logic ----------------------------- #
 
-async def batch_evaluate_all_articles(df: pd.DataFrame, client: genai.Client, config: dict, title_col: str, abstract_col: str):
-    """Send one batch request to Gemini and return scores for all articles."""
-    
-    # Prepare all articles as JSON data
-    articles_data = []
-    for idx, row in df.iterrows():
-        articles_data.append({
-            "article_id": idx + 1,
-            "title": row[title_col],
-            "abstract": row[abstract_col]
-        })
+async def evaluate_single_batch(articles_batch: list, client: genai.Client, config: dict, batch_num: int, total_batches: int, max_retries: int = MAX_RETRIES):
+    """Evaluate a single batch of articles with retry logic."""
+    batch_size = len(articles_batch)
     
     # Create the batch input content
-    articles_json = json.dumps(articles_data, ensure_ascii=False, indent=2)
+    articles_json = json.dumps(articles_batch, ensure_ascii=False, indent=2)
     
     scoring_description = "\\n".join([
         f"{score}: {desc}" 
@@ -182,82 +177,226 @@ Please evaluate each article and return your response as a JSON array with the f
   ...
 ]
 
-Evaluate ALL {len(articles_data)} articles and assign a relevance score from 0-5 based on how well each article relates to the research topic. Return ONLY the JSON array, no other text."""
+Evaluate ALL {batch_size} articles and assign a relevance score from 0-5 based on how well each article relates to the research topic. Return ONLY the JSON array, no other text."""
 
     from google.genai import types
     
-    try:
-        response = await client.aio.models.generate_content(
-            model=MODEL_NAME,
-            contents=[{"role": "user", "parts": [{"text": user_content}]}],
-            config=types.GenerateContentConfig(
-                max_output_tokens=MAX_TOKENS,
-                temperature=0
-            )
-        )
-
-        # Extract the text response
-        response_text = ""
-        
-        if hasattr(response, 'candidates') and response.candidates:
-            for i, candidate in enumerate(response.candidates):
-                # Check for finish reason
-                if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
-                    print(f"[INFO] Response finish reason: {candidate.finish_reason}")
-                    
-                if hasattr(candidate, 'content') and candidate.content:
-                    parts = candidate.content.parts
-                    
-                    if parts:
-                        for part in parts:
-                            if hasattr(part, 'text') and part.text:
-                                response_text += part.text
-                    else:
-                        print("[WARN] Response has no content parts")
-                else:
-                    print(f"[WARN] Candidate {i} has no content")
-        else:
-            print("[WARN] No candidates found in response")
-            
-        if response_text:
-            print(f"[INFO] Received response text ({len(response_text)} characters)")
-        
-        # Try to parse JSON response
+    for attempt in range(max_retries):
         try:
-            # Clean the response text to extract just the JSON
-            response_text = response_text.strip()
-            if response_text.startswith('```json'):
-                response_text = response_text[7:]
-            if response_text.endswith('```'):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
+            print(f"[INFO] Processing batch {batch_num}/{total_batches} (articles {articles_batch[0]['article_id']}-{articles_batch[-1]['article_id']}, attempt {attempt + 1}/{max_retries})")
             
-            evaluations = json.loads(response_text)
+            response = await client.aio.models.generate_content(
+                model=MODEL_NAME,
+                contents=[{"role": "user", "parts": [{"text": user_content}]}],
+                config=types.GenerateContentConfig(
+                    max_output_tokens=MAX_TOKENS,
+                    temperature=0
+                )
+            )
+
+            # Extract the text response
+            response_text = ""
             
-            # Extract scores in the correct order
-            scores = [0] * len(df)  # Initialize with zeros
-            
-            for evaluation in evaluations:
-                if isinstance(evaluation, dict):
-                    article_id = evaluation.get("article_id", 0)
-                    relevance_score = evaluation.get("relevance_score", 0)
-                    
-                    # Convert to proper index (article_id is 1-based)
-                    if 1 <= article_id <= len(df):
-                        scores[article_id - 1] = int(relevance_score)
-            
-            print(f"✅ Successfully parsed {len(evaluations)} evaluations from response")
-            return scores
-            
-        except json.JSONDecodeError as json_err:
-            print(f"[ERROR] Failed to parse JSON response: {json_err}")
+            if hasattr(response, 'candidates') and response.candidates:
+                for i, candidate in enumerate(response.candidates):
+                    # Check for finish reason
+                    if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                        finish_reason = candidate.finish_reason
+                        if finish_reason == "MAX_TOKENS":
+                            print(f"[WARN] Batch {batch_num} hit MAX_TOKENS limit - may need smaller batches")
+                        else:
+                            print(f"[INFO] Batch {batch_num} finish reason: {finish_reason}")
+                        
+                    if hasattr(candidate, 'content') and candidate.content:
+                        parts = candidate.content.parts
+                        
+                        if parts:
+                            for part in parts:
+                                if hasattr(part, 'text') and part.text:
+                                    response_text += part.text
+                        else:
+                            print(f"[WARN] Batch {batch_num} response has no content parts")
+                    else:
+                        print(f"[WARN] Batch {batch_num} candidate {i} has no content")
+            else:
+                print(f"[WARN] Batch {batch_num} has no candidates in response")
+                
             if response_text:
-                print(f"[ERROR] Response preview: {response_text[:200]}...")
-            return [0] * len(df)
+                print(f"[INFO] Batch {batch_num} received response text ({len(response_text)} characters)")
             
-    except Exception as exc:
-        print(f"[ERROR] Batch evaluation failed: {exc}")
-        return [0] * len(df)
+            # Try to parse JSON response
+            try:
+                # Clean the response text to extract just the JSON
+                response_text = response_text.strip()
+                if response_text.startswith('```json'):
+                    response_text = response_text[7:]
+                if response_text.endswith('```'):
+                    response_text = response_text[:-3]
+                response_text = response_text.strip()
+                
+                evaluations = json.loads(response_text)
+                
+                # Extract scores and create result mapping
+                batch_scores = {}
+                
+                for evaluation in evaluations:
+                    if isinstance(evaluation, dict):
+                        article_id = evaluation.get("article_id", 0)
+                        relevance_score = evaluation.get("relevance_score", 0)
+                        batch_scores[article_id] = int(relevance_score)
+                
+                print(f"✅ Batch {batch_num} completed: {len(evaluations)} evaluations parsed")
+                return batch_scores
+                
+            except json.JSONDecodeError as json_err:
+                print(f"[ERROR] Batch {batch_num} JSON parse failed (attempt {attempt + 1}): {json_err}")
+                if response_text:
+                    print(f"[ERROR] Response preview: {response_text[:200]}...")
+                
+                # If this is the last attempt, return zeros for this batch
+                if attempt == max_retries - 1:
+                    print(f"[ERROR] Batch {batch_num} failed after {max_retries} attempts - using default scores")
+                    return {article['article_id']: 0 for article in articles_batch}
+                
+                # Wait before retry
+                await asyncio.sleep(1)
+                
+        except Exception as exc:
+            print(f"[ERROR] Batch {batch_num} API call failed (attempt {attempt + 1}): {exc}")
+            
+            # If this is the last attempt, return zeros for this batch
+            if attempt == max_retries - 1:
+                print(f"[ERROR] Batch {batch_num} failed after {max_retries} attempts - using default scores")
+                return {article['article_id']: 0 for article in articles_batch}
+            
+            # Wait before retry
+            await asyncio.sleep(2)
+    
+    # This should never be reached, but just in case
+    return {article['article_id']: 0 for article in articles_batch}
+
+def get_progress_file_path(output_path: str) -> str:
+    """Generate progress file path based on output file path."""
+    base_name = os.path.splitext(output_path)[0]
+    return f"{base_name}_progress.json"
+
+def save_progress(progress_file: str, completed_batches: dict, total_batches: int):
+    """Save current progress to file."""
+    progress_data = {
+        "completed_batches": completed_batches,
+        "total_batches": total_batches,
+        "timestamp": pd.Timestamp.now().isoformat()
+    }
+    with open(progress_file, 'w', encoding='utf-8') as f:
+        json.dump(progress_data, f, ensure_ascii=False, indent=2)
+
+def load_progress(progress_file: str) -> dict:
+    """Load progress from file if it exists."""
+    if not os.path.exists(progress_file):
+        return {}
+    
+    try:
+        with open(progress_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {}
+
+async def batch_evaluate_all_articles(df: pd.DataFrame, client: genai.Client, config: dict, title_col: str, abstract_col: str, output_path: str, batch_size: int = DEFAULT_BATCH_SIZE, start_time: float = None):
+    """Process all articles in intelligent batches with progress tracking and error recovery."""
+    
+    total_articles = len(df)
+    progress_file = get_progress_file_path(output_path)
+    
+    print(f"Processing {total_articles} articles in batches of {batch_size}...")
+    
+    # Prepare all articles as structured data
+    all_articles = []
+    for idx, row in df.iterrows():
+        all_articles.append({
+            "article_id": idx + 1,
+            "title": row[title_col],
+            "abstract": row[abstract_col]
+        })
+    
+    # Split into batches
+    batches = []
+    for i in range(0, len(all_articles), batch_size):
+        batch = all_articles[i:i + batch_size]
+        batches.append(batch)
+    
+    total_batches = len(batches)
+    print(f"Split into {total_batches} batches")
+    
+    # Load existing progress
+    progress_data = load_progress(progress_file)
+    all_scores = {}
+    completed_batch_count = 0
+    
+    if progress_data.get("completed_batches"):
+        print(f"Found existing progress file - resuming from previous session")
+        # Convert string keys back to integers
+        for article_id_str, score in progress_data["completed_batches"].items():
+            all_scores[int(article_id_str)] = score
+        completed_batch_count = len([batch for batch in batches if all(article['article_id'] in all_scores for article in batch)])
+        if completed_batch_count > 0:
+            print(f"Resuming: {completed_batch_count} batches already completed")
+    
+    # Process batches sequentially with progress tracking
+    for batch_idx, batch in enumerate(batches, 1):
+        # Check if this batch is already completed
+        batch_already_done = all(article['article_id'] in all_scores for article in batch)
+        
+        if batch_already_done:
+            print(f"[SKIP] Batch {batch_idx}/{total_batches} already completed")
+        else:
+            batch_scores = await evaluate_single_batch(
+                batch, client, config, batch_idx, total_batches
+            )
+            all_scores.update(batch_scores)
+            
+            # Save progress after each batch
+            save_progress(progress_file, all_scores, total_batches)
+        
+        # Show progress with elapsed time and estimated remaining time
+        processed_articles = batch_idx * batch_size
+        if processed_articles > total_articles:
+            processed_articles = total_articles
+        
+        progress_percent = processed_articles / total_articles * 100
+        
+        # Calculate elapsed time and estimated remaining time
+        if start_time:
+            elapsed_time = time.time() - start_time
+            elapsed_minutes = elapsed_time / 60
+            
+            if processed_articles > 0:
+                time_per_article = elapsed_time / processed_articles
+                remaining_articles = total_articles - processed_articles
+                estimated_remaining_time = time_per_article * remaining_articles
+                estimated_remaining_minutes = estimated_remaining_time / 60
+                
+                print(f"Progress: {processed_articles}/{total_articles} articles ({progress_percent:.1f}%) | "
+                      f"Elapsed: {elapsed_minutes:.1f}m | Est. remaining: {estimated_remaining_minutes:.1f}m")
+            else:
+                print(f"Progress: {processed_articles}/{total_articles} articles ({progress_percent:.1f}%) | "
+                      f"Elapsed: {elapsed_minutes:.1f}m")
+        else:
+            print(f"Progress: {processed_articles}/{total_articles} articles ({progress_percent:.1f}%)")
+    
+    # Convert to ordered list matching original dataframe
+    final_scores = []
+    for idx in range(len(df)):
+        article_id = idx + 1
+        score = all_scores.get(article_id, 0)
+        final_scores.append(score)
+    
+    # Clean up progress file on successful completion
+    if os.path.exists(progress_file):
+        os.remove(progress_file)
+        print(f"Removed progress file: {progress_file}")
+    
+    print(f"✅ Batch evaluation completed! Processed {len(final_scores)} articles across {total_batches} batches.")
+    return final_scores
 
 async def main(args):
     # Load configuration
@@ -307,13 +446,37 @@ async def main(args):
 
     client = genai.Client()
     
-    # Print processing information
-    print(f"Processing {len(df)} articles in a single batch request...")
+    # Track start time for timeout and elapsed time display
+    start_time = time.time()
+    print(f"Starting processing with {args.timeout} second timeout ({args.timeout/60:.1f} minutes)")
     
-    # Single batch evaluation call
-    scores = await batch_evaluate_all_articles(df, client, config, title_col, abstract_col)
+    # Process articles in intelligent batches with timeout
+    try:
+        scores = await asyncio.wait_for(
+            batch_evaluate_all_articles(df, client, config, title_col, abstract_col, args.output, start_time=start_time),
+            timeout=args.timeout
+        )
+        elapsed_time = time.time() - start_time
+        print(f"✅ Processing completed successfully in {elapsed_time:.1f} seconds ({elapsed_time/60:.1f} minutes)")
+        
+    except asyncio.TimeoutError:
+        elapsed_time = time.time() - start_time
+        print(f"\n⏰ TIMEOUT: Processing stopped after {elapsed_time:.1f} seconds ({elapsed_time/60:.1f} minutes)")
+        print(f"Progress has been saved and processing can be resumed by running the same command again.")
+        
+        # Attempt to load any partial results from progress file for graceful exit
+        progress_file = get_progress_file_path(args.output)
+        progress_data = load_progress(progress_file)
+        
+        if progress_data.get("completed_batches"):
+            completed_articles = len(progress_data["completed_batches"])
+            total_articles = len(df)
+            print(f"Completed: {completed_articles}/{total_articles} articles ({completed_articles/total_articles*100:.1f}%)")
+        
+        # Exit gracefully - don't save incomplete results to final output
+        print("Use the same command to resume processing from where it left off.")
+        return
     
-    print(f"✅ Batch evaluation completed! Processed {len(scores)} articles.")
 
     # Save to new CSV
     output_data = {
@@ -336,6 +499,7 @@ if __name__ == "__main__":
     parser.add_argument('--input',  required=True, help='Input CSV (with title, abstract)')
     parser.add_argument('--output', required=True, help='Output CSV path')
     parser.add_argument('--config', default=DEFAULT_CONFIG_FILE, help=f'Configuration file (default: {DEFAULT_CONFIG_FILE})')
+    parser.add_argument('--timeout', type=int, default=600, help='Maximum execution time in seconds (default: 600 = 10 minutes)')
     parsed_args = parser.parse_args()
 
     try:

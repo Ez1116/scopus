@@ -1,16 +1,16 @@
 {
- "research_topic": "The Relationship Between Inquiry-Based Learning and Systems Thinking in Understanding Dynamic Complexity",
- "research_description": "Looking for research that explores the connections between inquiry-based learning and systems thinking, particularly focusing on cognitive skill development in K-12 educational environments based on complex systems theory, including understanding causal relationships with time delays, systems feedback loop cognition, nonlinear change prediction abilities, multi-variable interaction analysis capabilities, and skill transfer from inquiry skills to systems analysis and from systems thinking to deeper inquiry",
+ "research_topic": "Studies Mentioning Both Inquiry and Systems Thinking/Complex Systems",
+ "research_description": "Looking for research that mentions both inquiry concepts and systems thinking/complex systems concepts within the same article, particularly in K-12 educational contexts. The goal is to identify studies that discuss these two domains together, ranging from specific inquiry-based learning approaches to broader inquiry concepts, and from systems thinking to complex systems theory.",
  "tool_name": "record_evaluation",
- "tool_description": "Record a relevance score (0–5) after analysing whether an academic abstract is related to the connections between inquiry-based learning and systems thinking in understanding dynamic complexity.",
+ "tool_description": "Record a relevance score (0–5) after analysing whether an academic abstract mentions inquiry and systems thinking/complex systems concepts.",
  "scoring_criteria": {
-   "5": "Research simultaneously involves inquiry-based learning and systems thinking, based on complex systems theory, exploring the development of understanding causal relationships with time delays, systems feedback loop cognition, nonlinear change prediction abilities, multi-variable interaction analysis capabilities, or skill transfer in K-12 educational environments",
-   "4": "Research involves either inquiry-based learning or systems thinking, but explicitly discusses complex systems theory and dynamic complexity cognition, or explores related cognitive skill development",
-   "3": "Research involves inquiry-based learning or systems thinking, discussing some aspects of causal relationships, feedback loops, nonlinear changes, or multi-variable interactions",
-   "2": "Research involves inquiry-based learning or systems thinking, but only slightly touches on complexity concepts or related cognitive skills",
+   "5": "Research mentions inquiry-based learning along with either systems thinking or complex systems",
+   "4": "Research mentions inquiry along with either systems thinking or complex systems",
+   "3": "Research mentions either systems thinking or complex systems but not inquiry",
+   "2": "Research only mentions inquiry",
    "1": "Research primarily focuses on other topics but mentions concepts related to inquiry or systems thinking",
-   "0": "Completely unrelated to inquiry-based learning, systems thinking, or understanding dynamic complexity"
+   "0": "Completely unrelated to inquiry, systems thinking, or complex systems"
  },
- "system_prompt_template": "You are an expert in educational research, complex systems theory, and cognitive science.\nYour task: read an academic article's abstract and decide how strongly the study relates to the connections between inquiry-based learning and systems thinking in understanding dynamic complexity.\n\nLook for:\n  1. Studies that explore inquiry-based learning and/or systems thinking approaches in K-12 education contexts\n  2. Research addressing cognitive skills in understanding causal relationships with time delays, feedback loops, nonlinear changes, and multi-variable interactions\n  3. Evidence of skill transfer between inquiry abilities and systems analysis, or from systems thinking to deeper inquiry processes\n\nOutput ONLY by calling the provided function record_evaluation.",
+ "system_prompt_template": "You are an expert in educational research, complex systems theory, and cognitive science.\nYour task: read an academic article's abstract and decide how strongly the study mentions both inquiry and systems thinking/complex systems concepts, particularly in K-12 educational contexts.\n\nLook for:\n  1. Whether the article mentions inquiry-related concepts (inquiry, inquiry-based learning, scientific inquiry, etc.)\n  2. Whether the article mentions systems thinking or complex systems concepts\n  3. The degree of connection between these two concept domains within the article\n\nOutput ONLY by calling the provided function record_evaluation.",
  "evaluation_instruction": "Evaluate relevance on the 0-5 rubric described by the system."
 }
